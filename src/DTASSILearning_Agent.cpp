@@ -37,9 +37,6 @@
 
 #include "SSIPatrolAgent.h"
 
-
-
-
 //Sequential Single Item Auction with dynamic compact partition of the environment
 class DTASSILearning_Agent: public SSIPatrolAgent {
 
@@ -61,15 +58,24 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
 
         double compute_sum_distance(int cv);
 
+        //
+        float** learnign_weigh;
 
+        // time and space at witch the robot start from the last node
+        bool   has_extimation;
+        double extimation_starting_time;
+        double travel_time_prediction;
+        uint   extimation_starting_point;
+
+        // filter new weight
+        double alpha;
 
     public:
 
         DTASSILearning_Agent(){}
 
+        void onGoalComplete();
         void init(int argc, char** argv);
-
-
 };
 
 void DTASSILearning_Agent::init(int argc, char** argv) {
@@ -91,52 +97,122 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
 
     //initialize parameters
 
+    learnign_weigh = new float*[dimension];
+    for ( int i = 0; i < dimension; ++i ) {
+        learnign_weigh[i] = new float[dimension];
+        for ( int j = 0; j < dimension; ++j ) // TODO: initial value probably need extra tuning
+            learnign_weigh[i][j] = 1.0f / 5.0f;
+    }
+
+    has_extimation = false;
+    alpha = 0.5;
 }
 
+// based on SSIPatrolAgen::onGoalComplete, but with extra time extimation
+void DTASSILearning_Agent::onGoalComplete()
+{
+    //printf("DTAPL onGoalComplete!!!\n");
+
+    // learn from prediction
+    if (has_extimation) {
+        double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
+
+        double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
+        double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+
+        learnign_weigh[extimation_starting_point][current_vertex] = 
+            alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+
+        printf("traveled time from %d to %d:\n"
+                "real time      : %fs\n"
+                "predicted time : %fs\n"
+                "old weight : %f\n"
+                "new weight : %f\n",extimation_starting_point,
+                current_vertex,real_travel_time, travel_time_prediction,
+                old_weight, learnign_weigh[extimation_starting_point][current_vertex]);
+    }
+
+    extimation_starting_point = current_vertex;
+
+    if (first_vertex){
+        //printf("computing next vertex FOR THE FIRST TIME:\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d",current_vertex, next_vertex,next_next_vertex);
+        next_vertex = compute_next_vertex(current_vertex);
+        //printf("DONE: current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+        first_vertex = false;
+    } else {
+        //printf("updating next vertex :\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+
+        //Update Idleness Table:
+        update_global_idleness();
+        //update current vertex
+        current_vertex = next_vertex;
+        //update next vertex based on previous decision
+        next_vertex = next_next_vertex;
+        //update global idleness of next vertex to avoid conflicts
+
+        if (next_vertex>=0 && next_vertex< dimension){
+            pthread_mutex_lock(&lock);
+            global_instantaneous_idleness[next_vertex] = 0.0;
+            pthread_mutex_unlock(&lock);
+        }
+        //printf("DONE: current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+    }
+
+    /** SEND GOAL (REACHED) AND INTENTION **/
+    send_goal_reached(); // Send TARGET to monitor
+    send_results();  // Algorithm specific function
+
+    // prediction on travel time
+    extimation_starting_time = ros::Time::now().toSec();
+    travel_time_prediction =
+        learnign_weigh[extimation_starting_point][next_vertex] * (compute_cost(extimation_starting_point,next_vertex)) ;
+    has_extimation = true;
+
+    ROS_INFO("Sending goal - Vertex %d (%f,%f) at time %fs\n", next_vertex, vertex_web[next_vertex].x, vertex_web[next_vertex].y, extimation_starting_time);
+
+    //Send the goal to the robot (Global Map)
+    sendGoal(next_vertex);  // send to move_base
+
+    goal_complete = false;
+
+    //compute next next vertex
+    //printf("computing next_next_vertex :\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+
+    next_next_vertex = compute_next_vertex(next_vertex);
+
+    printf("<<< DONE Computed next vertices: current_vertex = %d, next_vertex=%d, next_next_vertex=%d >>>\n",current_vertex, next_vertex,next_next_vertex);
+
+}
 double DTASSILearning_Agent::compute_bid(int nv){
 
-    /*printf("computing bid for vertex %d (using dynamic partition) \n ",nv);
-      printf("current tasks = ");
-      for (size_t i = 0; i<dimension;i++){
-      printf(" %d, ",tasks[i]);
-      }
-      printf("] \n");*/
+    // is next vertex usefull?
+    if (nv==next_vertex || nv==next_next_vertex) return 0.;
 
-    if (nv==next_vertex || nv==next_next_vertex){
-        // printf("already going to %d sending 0 (current target: %d)",nv,next_vertex);
-        return 0.;
-    }
-
+    // find the number of required task
     size_t num_tasks = 1;
-    for (size_t i = 0; i<dimension ; i++){
-        if (tasks[i]){
-            num_tasks++;
-        }
-    }
+    for (size_t i = 0; i<dimension ; i++) if (tasks[i]) num_tasks++;
 
-    //	size_t cv = current_vertex;
-    //	if (next_vertex >= 0 && next_vertex <dimension){
-    //		cv = next_vertex;
-    //	}
+    // compute the cost
+    // TODO: probabily the weight must be refined
+    double bid_value =
+        compute_cost(nv,current_center_location)*
+        num_tasks*
+        learnign_weigh[nv][current_center_location];
 
-    double bid_value = compute_cost(nv,current_center_location)*num_tasks;
-    //printf("bid for %d (current center %zu, num task %zu): %.2f \n",nv,current_center_location,num_tasks,bid_value);
+    //printf(" BID VALUE %f \n", bid_value);
 
     return bid_value;
 }
 
-
-
-
 void DTASSILearning_Agent::compute_center_location(){
     size_t min = current_vertex;
-    //	printf("compute center:: min: %d current center: %d \n",min,current_center_location);
+    //    printf("compute center:: min: %d current center: %d \n",min,current_center_location);
     double min_dist = compute_sum_distance(min);
-    //	printf("compute center:: min dist: %.2f \n",min_dist);
+    //    printf("compute center:: min dist: %.2f \n",min_dist);
     for (size_t i = 0; i<dimension; i++){
         if (i!=current_center_location && tasks[i]){
             double dist = compute_sum_distance(i);
-            //			printf("compute center:: current dist: %.2f, min dist: %.2f, current min: %d, current point: %d \n",dist,min_dist,min,i);
+            //          printf("compute center:: current dist: %.2f, min dist: %.2f, current min: %d, current point: %d \n",dist,min_dist,min,i);
             if ( dist < min_dist){
                 min = i;
                 min_dist = dist;
@@ -149,20 +225,20 @@ void DTASSILearning_Agent::compute_center_location(){
 
 double DTASSILearning_Agent::compute_sum_distance(int cv){
     if(cv<0 || cv >= dimension){
-        //		printf("return big number: cv = %d",cv);
+        //          printf("return big number: cv = %d",cv);
         return BIG_NUMBER;
     }
     double sum = 0.;
     for (size_t i = 0; i<dimension ; i++){
         if (tasks[i]){
-            //			printf("sum: %2.f \n",sum);
+            //          printf("sum: %2.f \n",sum);
             sum+= compute_cost(cv,i);
         }
     }
     return sum;
 }
 
-void DTASSILearning_Agent::update_tasks(){
+void DTASSILearning_Agent::update_tasks() {
 
     /*debug print
       printf("updating tasks: \n tasks before[");
@@ -200,19 +276,15 @@ void DTASSILearning_Agent::update_tasks(){
 
 #if DEBUG_PRINT
 
-    printf("DTAP current center location: %lu\n",current_center_location);
-    printf("DTAP: Active Tasks %d [",nactivetasks);
+    printf("DTAPL current center location: %lu\n",current_center_location);
+    printf("DTAPL: Active Tasks %d [",nactivetasks);
     for (size_t i = 0; i<dimension; i++){
         if (tasks[i]) printf("%lu ",i);
     }
     printf("] \n");
 
-
-
 #endif
 }
-
-
 
 int main(int argc, char** argv) {
 
