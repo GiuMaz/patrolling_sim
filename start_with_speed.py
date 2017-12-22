@@ -28,12 +28,15 @@ Alg_names = [
         [ 'SEBS', 'SEBS' ],
         [ 'CBLS', 'CBLS' ],
         [ 'DTAG', 'DTAGreedy' ],
-        [ 'DTAP', 'DTASSIPart' ]
+        [ 'DTAP', 'DTASSIPart' ],
+        [ 'DTAPL', 'DTASSILearning' ]
      ]
 
 Map_names = ['cumberland','example','grid','1r5','broughton','DIAG_labs','DIAG_floor1']   
 
 NRobots_list = ['1','2','4','6','8','10','12']
+
+Robot_speed = ['normal','slow']
 
 LocalizationMode_list = ['AMCL','fake_localization']
 
@@ -101,7 +104,7 @@ def getSimulationRunning():
 # Terminates if simulation is stopped (/simulation_running param is false)
 # or if timeout is reached (if this is >0)
 # CUSTOM_STAGE: use of extended API for stage (requires custom stage and stage_ros).
-def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT, CUSTOM_STAGE, SPEEDUP):
+def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT, ROBOT0_SPEED, CUSTOM_STAGE, SPEEDUP):
 
     ALG = findAlgName(ALG_SHORT)
     print 'Run the experiment'
@@ -115,6 +118,7 @@ def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT
     print 'Communication delay ',COMMDELAY
     print 'Terminal ',TERM
     print 'Timeout ',TIMEOUT
+    print 'Speed Robot 0 ',ROBOT0_SPEED
     print 'Custom Stage ',CUSTOM_STAGE
     print 'Simulator speed-up ',SPEEDUP    
 
@@ -186,6 +190,10 @@ def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT
            cmd = cmd + ' use_amcl:=false use_move_base:=false  use_thin_localizer:=true use_thin_planner:=true '
         elif (NAV_MODULE=="thin_localizer_only"):
            cmd = cmd + ' use_amcl:=false use_move_base:=true  use_thin_localizer:=true use_thin_planner:=false '
+
+        if i == 0 and ROBOT0_SPEED == "slow":
+            cmd = cmd + ' move_base_slow:=true '
+
            
         cmd = cmd + "'"
         print cmd
@@ -302,6 +310,22 @@ class DIP(tk.Frame):
 
         _row = _row + 1
 
+        #for i in range(1,13):
+        lbl = Label(self, text="Speed of Robot "+str(0))
+        lbl.grid(sticky=W, row=_row, column=0, pady=4, padx=5)
+
+        self.robots_speed0 = Robot_speed
+        self.robots_speed_ddm0 = StringVar(self)
+        try:
+            lastspeed=self.oldConfigs["robot_speed0"]
+        except:
+            lastspeed=self.robots_speed0[0]
+
+        self.robots_speed_ddm0.set(lastspeed)
+        tk.OptionMenu(self, self.robots_speed_ddm0, *self.robots_speed0).grid(sticky=W, row=_row, column=1, pady=4, padx=5)
+
+        _row = _row + 1
+
         lbl = Label(self, text="Algorithm")
         lbl.grid(sticky=W, row = _row, column= 0, pady=4, padx=5)
 
@@ -384,7 +408,7 @@ class DIP(tk.Frame):
     
     def launch_script(self):
         self.saveConfigFile();
-        thread.start_new_thread( run_experiment, (self.map_ddm.get(), self.robots_ddm.get(), INITPOS_DEFAULT, self.alg_ddm.get(),self.locmode_ddm.get(), NAVMODULE_DEFAULT, self.gwait_ddm.get(), COMMDELAY_DEFAULT, self.term_ddm.get(),0,"false",1.0) )
+        thread.start_new_thread( run_experiment, (self.map_ddm.get(), self.robots_ddm.get(), INITPOS_DEFAULT, self.alg_ddm.get(),self.locmode_ddm.get(), NAVMODULE_DEFAULT, self.gwait_ddm.get(), COMMDELAY_DEFAULT, self.term_ddm.get(),0,self.robots_speed_ddm0.get(), "false",1.0) )
 
     
     def quit(self):
@@ -404,6 +428,7 @@ class DIP(tk.Frame):
       f.write("navmode: %s\n"%self.navmode_ddm.get())
       f.write("gwait: %s\n"%self.gwait_ddm.get())
       f.write("term: %s\n"%self.term_ddm.get())
+      f.write("robot_speed0: %s\n"%self.robots_speed_ddm0.get())
       f.close()
 
 
@@ -426,12 +451,12 @@ def main():
   if (len(sys.argv)==1):
     root = tk.Tk()
     DIP(root)
-    root.geometry("300x320+0+0")
+    root.geometry("300x350+0+0")
     root.mainloop()  
 
   elif (len(sys.argv)<10):
     print "Use: ",sys.argv[0]
-    print " or  ",sys.argv[0],' <map> <n.robots> <init_pos> <alg_short> <loc_mode> <nav_module> <goal_wait_time> <communication_delay> <terminal> <timeout> [<custom_stage_flag>|def:false] [<sim_speedup>|def:1.0]'
+    print " or  ",sys.argv[0],' <map> <n.robots> <init_pos> <alg_short> <loc_mode> <nav_module> <goal_wait_time> <communication_delay> <terminal> <timeout> [<robot0_speed>|def:normal] [<custom_stage_flag>|def:false] [<sim_speedup>|def:1.0]'
 
   else:
     MAP = sys.argv[1]
@@ -444,14 +469,17 @@ def main():
     COMMDELAY = sys.argv[8]
     TERM = sys.argv[9]
     TIMEOUT = int(sys.argv[10])
+    ROBOT0_SPEED = 1.0
     CUSTOM_STAGE = False
     SPEEDUP = 1.0
     if (len(sys.argv)>=12):
-      CUSTOM_STAGE = sys.argv[11]
+      ROBOT0_SPEED = sys.argv[11]
     if (len(sys.argv)>=13):
-      SPEEDUP = float(sys.argv[12])
+      CUSTOM_STAGE = sys.argv[12]
+    if (len(sys.argv)>=14):
+      SPEEDUP = float(sys.argv[13])
     
-    run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT, CUSTOM_STAGE,SPEEDUP)
+    run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT,ROBOT0_SPEED, CUSTOM_STAGE,SPEEDUP)
 
  
 
