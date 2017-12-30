@@ -1,39 +1,39 @@
 /*********************************************************************
- *
- * Software License Agreement (BSD License)
- *
- *  Copyright (c) 2014, ISR University of Coimbra.
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions
- *  are met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *   * Neither the name of the ISR University of Coimbra nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Luca Iocchi (2014-2016)
- *********************************************************************/
+*
+* Software License Agreement (BSD License)
+*
+*  Copyright (c) 2014, ISR University of Coimbra.
+*  All rights reserved.
+*
+*  Redistribution and use in source and binary forms, with or without
+*  modification, are permitted provided that the following conditions
+*  are met:
+*
+*   * Redistributions of source code must retain the above copyright
+*     notice, this list of conditions and the following disclaimer.
+*   * Redistributions in binary form must reproduce the above
+*     copyright notice, this list of conditions and the following
+*     disclaimer in the documentation and/or other materials provided
+*     with the distribution.
+*   * Neither the name of the ISR University of Coimbra nor the names of its
+*     contributors may be used to endorse or promote products derived
+*     from this software without specific prior written permission.
+*
+*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+*  POSSIBILITY OF SUCH DAMAGE.
+*
+* Author: Giulio Mazzi (2017-2018)
+*********************************************************************/
 
 #include "SSIPatrolAgent.h"
 
@@ -62,7 +62,6 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
         float** learnign_weigh;
 
         // time and space at witch the robot start from the last node
-        bool   has_extimation;
         double extimation_starting_time;
         double travel_time_prediction;
         uint   extimation_starting_point;
@@ -75,6 +74,7 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
         DTASSILearning_Agent(){}
 
         void onGoalComplete();
+        double compute_cost(int start, int end);
         void init(int argc, char** argv);
 };
 
@@ -101,49 +101,24 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
     for ( int i = 0; i < dimension; ++i ) {
         learnign_weigh[i] = new float[dimension];
         for ( int j = 0; j < dimension; ++j ) // TODO: initial value probably need extra tuning
-            learnign_weigh[i][j] = 1.0f / 5.0f;
+            learnign_weigh[i][j] = 1.0f;
     }
-
-    has_extimation = false;
-    alpha = 0.5;
+    extimation_starting_point = current_vertex;
+    alpha = 0.2;
 }
 
 // based on SSIPatrolAgen::onGoalComplete, but with extra time extimation
 void DTASSILearning_Agent::onGoalComplete()
 {
     //printf("DTAPL onGoalComplete!!!\n");
-
-    // learn from prediction
-    if (has_extimation) {
-        double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
-
-        double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
-        double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
-
-        learnign_weigh[extimation_starting_point][current_vertex] = 
-            alpha * ( new_weight ) + (1.0-alpha) * old_weight;
-
-        printf("traveled time from %d to %d:\n"
-                "real time      : %fs\n"
-                "predicted time : %fs\n"
-                "old weight : %f\n"
-                "new weight : %f\n",extimation_starting_point,
-                current_vertex,real_travel_time, travel_time_prediction,
-                old_weight, learnign_weigh[extimation_starting_point][current_vertex]);
-    }
-
-    extimation_starting_point = current_vertex;
-
     if (first_vertex){
-        //printf("computing next vertex FOR THE FIRST TIME:\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d",current_vertex, next_vertex,next_next_vertex);
         next_vertex = compute_next_vertex(current_vertex);
-        //printf("DONE: current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
         first_vertex = false;
     } else {
-        //printf("updating next vertex :\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
-
         //Update Idleness Table:
         update_global_idleness();
+        // remember last point
+        extimation_starting_point = current_vertex;
         //update current vertex
         current_vertex = next_vertex;
         //update next vertex based on previous decision
@@ -156,19 +131,64 @@ void DTASSILearning_Agent::onGoalComplete()
             pthread_mutex_unlock(&lock);
         }
         //printf("DONE: current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+
+        // learn from prediction
+        double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
+
+        double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
+        double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+
+        learnign_weigh[extimation_starting_point][current_vertex] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+
+        printf("traveled time from %d to %d:\n"
+                "real time      : %fs\n"
+                "predicted time : %fs\n"
+                "old weight : %f\n"
+                "new weight : %f\n",extimation_starting_point,
+                current_vertex,real_travel_time, travel_time_prediction,
+                old_weight, learnign_weigh[extimation_starting_point][current_vertex]);
     }
 
     /** SEND GOAL (REACHED) AND INTENTION **/
     send_goal_reached(); // Send TARGET to monitor
     send_results();  // Algorithm specific function
 
-    // prediction on travel time
+    // prediction on distance
     extimation_starting_time = ros::Time::now().toSec();
-    travel_time_prediction =
-        learnign_weigh[extimation_starting_point][next_vertex] * (compute_cost(extimation_starting_point,next_vertex)) ;
-    has_extimation = true;
+    travel_time_prediction = learnign_weigh[extimation_starting_point][next_vertex]*(compute_cost(extimation_starting_point,next_vertex));
 
-    ROS_INFO("Sending goal - Vertex %d (%f,%f) at time %fs\n", next_vertex, vertex_web[next_vertex].x, vertex_web[next_vertex].y, extimation_starting_time);
+    // prediction on rotation
+    float y_diff = vertex_web[next_vertex].y - vertex_web[current_vertex].y;
+    float x_diff = vertex_web[next_vertex].x - vertex_web[current_vertex].x;
+    const float PI = 3.1415;
+
+    // yaw to new point
+    float  pred_yaw;
+    if ( std::abs(x_diff) > 0.00001f ) {
+        pred_yaw = atan( y_diff / x_diff);
+        if ( x_diff < 0.0f ) {
+            if ( y_diff < 0.0f )
+                pred_yaw-=PI;
+            else
+                pred_yaw+=PI;
+        }
+    }
+    else {
+        if ( y_diff > 0.0f )
+            pred_yaw = PI/2.0f;
+        else
+            pred_yaw = -(PI/2.0f);
+    }
+
+    printf("NEXT ANGLE %f", pred_yaw*(180.0f/PI));
+    float pose_x, pose_y, current_yaw;
+    getRobotPose(ID_ROBOT,pose_x,pose_y,current_yaw);
+    printf("  CURRENT ANGLE: %f\n", current_yaw*(180.0f/PI));
+    float rotate_prediction = std::min(std::abs(pred_yaw-current_yaw),std::abs(-PI - current_yaw)+(PI - pred_yaw));
+    printf(" need to rotate %f  so  %f seconds\n", rotate_prediction*(180.0/PI),rotate_prediction);
+    travel_time_prediction+= rotate_prediction;
+
+    ROS_INFO("Sending goal: Vertex %d (%f,%f) at time %fs\n",next_vertex,vertex_web[next_vertex].x,vertex_web[next_vertex].y,extimation_starting_time);
 
     //Send the goal to the robot (Global Map)
     sendGoal(next_vertex);  // send to move_base
@@ -183,6 +203,7 @@ void DTASSILearning_Agent::onGoalComplete()
     printf("<<< DONE Computed next vertices: current_vertex = %d, next_vertex=%d, next_next_vertex=%d >>>\n",current_vertex, next_vertex,next_next_vertex);
 
 }
+
 double DTASSILearning_Agent::compute_bid(int nv){
 
     // is next vertex usefull?
@@ -197,7 +218,7 @@ double DTASSILearning_Agent::compute_bid(int nv){
     double bid_value =
         compute_cost(nv,current_center_location)*
         num_tasks*
-        learnign_weigh[nv][current_center_location];
+        ( 1.0 / learnign_weigh[nv][current_center_location]);
 
     //printf(" BID VALUE %f \n", bid_value);
 
@@ -285,6 +306,27 @@ void DTASSILearning_Agent::update_tasks() {
 
 #endif
 }
+
+double DTASSILearning_Agent::compute_cost(int cv, int nv)
+{
+    uint elem_s_path;
+    int *shortest_path = new int[dimension]; 
+    int id_neigh;
+    
+    dijkstra( cv, nv, shortest_path, elem_s_path, vertex_web, dimension); //structure with normal costs
+    double distance = 0;
+    
+    for(uint j=0; j<elem_s_path; j++){
+//        printf("path[%u] = %d\n",j,shortest_path[j]);
+        
+        if (j<elem_s_path-1){
+            id_neigh = is_neigh(shortest_path[j], shortest_path[j+1], vertex_web, dimension);
+            distance += (RESOLUTION * vertex_web[shortest_path[j]].cost[id_neigh]);
+        }       
+    }
+    
+    return distance;
+}        
 
 int main(int argc, char** argv) {
 
