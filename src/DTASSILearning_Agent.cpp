@@ -58,8 +58,7 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
 
         double compute_sum_distance(int cv);
 
-        //
-        float** learnign_weigh;
+        //float** learnign_weigh;
 
         // time and space at witch the robot start from the last node
         double extimation_starting_time;
@@ -97,12 +96,14 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
 
     //initialize parameters
 
+    /*
     learnign_weigh = new float*[dimension];
     for ( int i = 0; i < dimension; ++i ) {
         learnign_weigh[i] = new float[dimension];
         for ( int j = 0; j < dimension; ++j ) // TODO: initial value probably need extra tuning
             learnign_weigh[i][j] = 1.0f;
     }
+    */
     extimation_starting_point = current_vertex;
     alpha = 0.2;
 }
@@ -135,18 +136,29 @@ void DTASSILearning_Agent::onGoalComplete()
         // learn from prediction
         double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
 
-        double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
-        double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+        //double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
+        int id_neigh = is_neigh(extimation_starting_point, current_vertex, vertex_web, dimension);
+        if ( id_neigh == -1 ){
+            printf("\n!!!! -1 for %d,%d\n\n", extimation_starting_point,current_vertex);
+        }
+        else {
+            printf("can learn\n");
+            double old_weight = vertex_web[extimation_starting_point].cost[id_neigh];
+            double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
 
-        learnign_weigh[extimation_starting_point][current_vertex] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+            vertex_web[extimation_starting_point].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
 
-        printf("traveled time from %d to %d:\n"
-                "real time      : %fs\n"
-                "predicted time : %fs\n"
-                "old weight : %f\n"
-                "new weight : %f\n",extimation_starting_point,
-                current_vertex,real_travel_time, travel_time_prediction,
-                old_weight, learnign_weigh[extimation_starting_point][current_vertex]);
+            int id_neigh2 = is_neigh(current_vertex, extimation_starting_point, vertex_web, dimension);
+            vertex_web[current_vertex].cost[id_neigh2] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+
+            printf("traveled time from %d to %d:\n"
+                    "real time      : %fs\n"
+                    "predicted time : %fs\n"
+                    "old weight : %f\n"
+                    "new weight : %f\n",
+                    extimation_starting_point, current_vertex,real_travel_time,
+                    travel_time_prediction, old_weight, vertex_web[extimation_starting_point].cost[id_neigh]);
+        }
     }
 
     /** SEND GOAL (REACHED) AND INTENTION **/
@@ -155,7 +167,8 @@ void DTASSILearning_Agent::onGoalComplete()
 
     // prediction on distance
     extimation_starting_time = ros::Time::now().toSec();
-    travel_time_prediction = learnign_weigh[extimation_starting_point][next_vertex]*(compute_cost(extimation_starting_point,next_vertex));
+    //travel_time_prediction = learnign_weigh[extimation_starting_point][next_vertex]*(compute_cost(extimation_starting_point,next_vertex));
+    travel_time_prediction = compute_cost(extimation_starting_point,next_vertex);
 
     // prediction on rotation
     float y_diff = vertex_web[next_vertex].y - vertex_web[current_vertex].y;
@@ -214,13 +227,12 @@ double DTASSILearning_Agent::compute_bid(int nv){
     for (size_t i = 0; i<dimension ; i++) if (tasks[i]) num_tasks++;
 
     // compute the cost
-    // TODO: probabily the weight must be refined
     double bid_value =
         compute_cost(nv,current_center_location)*
-        num_tasks*
-        ( 1.0 / learnign_weigh[nv][current_center_location]);
+        num_tasks;
+        //( 1.0 / learnign_weigh[nv][current_center_location]);
 
-    //printf(" BID VALUE %f \n", bid_value);
+    //printf("\nBID VALUE %f for %d, current %d, center %ld\n\n",bid_value, nv, current_vertex, current_center_location);
 
     return bid_value;
 }
@@ -321,7 +333,7 @@ double DTASSILearning_Agent::compute_cost(int cv, int nv)
         
         if (j<elem_s_path-1){
             id_neigh = is_neigh(shortest_path[j], shortest_path[j+1], vertex_web, dimension);
-            distance += (RESOLUTION * vertex_web[shortest_path[j]].cost[id_neigh]);
+            distance += vertex_web[shortest_path[j]].cost[id_neigh];
         }       
     }
     

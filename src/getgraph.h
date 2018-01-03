@@ -50,7 +50,8 @@ typedef unsigned int uint;
 typedef struct {
   uint id, num_neigh;
   float x, y; 		//pass these attributes in meters
-  uint id_neigh[8], cost[8];
+  uint id_neigh[8];
+  float cost[8];
   float cost_m[8];
   bool visited[8];
   char dir [8][3];	//table of 8 strings with 3 chars max ("N","NE","E","SE","S","SW","W","NW")
