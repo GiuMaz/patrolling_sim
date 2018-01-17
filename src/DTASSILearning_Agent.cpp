@@ -96,14 +96,6 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
 
     //initialize parameters
 
-    /*
-    learnign_weigh = new float*[dimension];
-    for ( int i = 0; i < dimension; ++i ) {
-        learnign_weigh[i] = new float[dimension];
-        for ( int j = 0; j < dimension; ++j ) // TODO: initial value probably need extra tuning
-            learnign_weigh[i][j] = 1.0f;
-    }
-    */
     extimation_starting_point = current_vertex;
     alpha = 0.2;
 }
@@ -136,10 +128,38 @@ void DTASSILearning_Agent::onGoalComplete()
         // learn from prediction
         double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
 
-        //double old_weight =learnign_weigh[extimation_starting_point][current_vertex]; 
+        //double old_weight =learnign_weigh[extimation_starting_point][current_vertex];
         int id_neigh = is_neigh(extimation_starting_point, current_vertex, vertex_web, dimension);
+
         if ( id_neigh == -1 ){
-            printf("\n!!!! -1 for %d,%d\n\n", extimation_starting_point,current_vertex);
+
+            double distance = compute_cost(extimation_starting_point,current_vertex);
+
+            int *shortest_path = new int[dimension];
+            uint elem_s_path;
+
+            // need to project the extimation over the track
+            dijkstra(extimation_starting_point, current_vertex,
+                    shortest_path, elem_s_path, vertex_web, dimension);
+
+            printf("multistep learning: total ditance %f, predicted time %f, travel time %f\n",distance,travel_time_prediction,real_travel_time);
+            for(uint j=0; j<elem_s_path; j++){
+                if (j<elem_s_path-1){
+
+                    id_neigh = is_neigh(shortest_path[j], shortest_path[j+1], vertex_web, dimension);
+
+                    double old_weight = vertex_web[shortest_path[j]].cost[id_neigh];
+                    double new_weight = old_weight*(real_travel_time/travel_time_prediction);
+                    printf("\tfrom %d to %d cost %f",shortest_path[j], shortest_path[j+1],old_weight);
+                    vertex_web[shortest_path[j]].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+                    printf(" -> %f\n",vertex_web[shortest_path[j]].cost[id_neigh]);
+
+                    int id_neigh2 = is_neigh(shortest_path[j+1], shortest_path[j], vertex_web, dimension);
+                    vertex_web[shortest_path[j+1]].cost[id_neigh2] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+                }
+            }
+
+            delete shortest_path;
         }
         else {
             printf("can learn\n");
@@ -322,23 +342,22 @@ void DTASSILearning_Agent::update_tasks() {
 double DTASSILearning_Agent::compute_cost(int cv, int nv)
 {
     uint elem_s_path;
-    int *shortest_path = new int[dimension]; 
+    int *shortest_path = new int[dimension];
     int id_neigh;
-    
-    dijkstra( cv, nv, shortest_path, elem_s_path, vertex_web, dimension); //structure with normal costs
+
+    dijkstra(cv, nv, shortest_path, elem_s_path, vertex_web, dimension); //structure with normal costs
     double distance = 0;
-    
+
     for(uint j=0; j<elem_s_path; j++){
 //        printf("path[%u] = %d\n",j,shortest_path[j]);
-        
         if (j<elem_s_path-1){
             id_neigh = is_neigh(shortest_path[j], shortest_path[j+1], vertex_web, dimension);
             distance += vertex_web[shortest_path[j]].cost[id_neigh];
-        }       
+        }
     }
-    
+
     return distance;
-}        
+}
 
 int main(int argc, char** argv) {
 
