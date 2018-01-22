@@ -68,6 +68,16 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
         // filter new weight
         double alpha;
 
+        // path to goal, required to evaluate every edge of the graph by itself
+        int *path_to_goal;
+        uint to_goal_size;
+        uint to_goal_position;
+
+        // rember waiting time
+        double real_goal_reached_wait;
+
+        void learn_from_edge();
+        void make_prediction();
     public:
 
         DTASSILearning_Agent(){}
@@ -98,97 +108,126 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
 
     extimation_starting_point = current_vertex;
     alpha = 0.2;
+
+    path_to_goal = new int[dimension];
+    to_goal_size = 0;
+    to_goal_position = 0;
+
+    // rember waiting time
+    real_goal_reached_wait = goal_reached_wait;
+
 }
 
-// based on SSIPatrolAgen::onGoalComplete, but with extra time extimation
 void DTASSILearning_Agent::onGoalComplete()
 {
+
     //printf("DTAPL onGoalComplete!!!\n");
     if (first_vertex){
+
         next_vertex = compute_next_vertex(current_vertex);
         first_vertex = false;
+
+        // calculate path to goal
+        dijkstra(current_vertex, next_vertex, path_to_goal, to_goal_size, vertex_web, dimension);
+        to_goal_position = 0;
+
+        /** SEND GOAL (REACHED) AND INTENTION **/
+        send_goal_reached(); // Send TARGET to monitor
+        send_results();  // Algorithm specific function
+
     } else {
-        //Update Idleness Table:
-        update_global_idleness();
-        // remember last point
-        extimation_starting_point = current_vertex;
-        //update current vertex
-        current_vertex = next_vertex;
-        //update next vertex based on previous decision
-        next_vertex = next_next_vertex;
-        //update global idleness of next vertex to avoid conflicts
+        // we are on then next vertices
+        ++to_goal_position;
+        printf("reached %d vertex\n",path_to_goal[to_goal_position]);
 
-        if (next_vertex>=0 && next_vertex< dimension){
-            pthread_mutex_lock(&lock);
-            global_instantaneous_idleness[next_vertex] = 0.0;
-            pthread_mutex_unlock(&lock);
-        }
-        //printf("DONE: current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
+        // learning
+        learn_from_edge();
 
-        // learn from prediction
-        double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
+        // we are in the real goal?
+        if ( to_goal_position == (to_goal_size-1) ) {
+            printf("reached goal\n");
+            //Update Idleness Table:
+            update_global_idleness();
+            //update current vertex
+            current_vertex = next_vertex;
+            //update next vertex based on previous decision
+            next_vertex = next_next_vertex;
+            //reset next_next
+            next_next_vertex = -1;
 
-        //double old_weight =learnign_weigh[extimation_starting_point][current_vertex];
-        int id_neigh = is_neigh(extimation_starting_point, current_vertex, vertex_web, dimension);
-
-        if ( id_neigh == -1 ){
-
-            double distance = compute_cost(extimation_starting_point,current_vertex);
-
-            int *shortest_path = new int[dimension];
-            uint elem_s_path;
-
-            // need to project the extimation over the track
-            dijkstra(extimation_starting_point, current_vertex,
-                    shortest_path, elem_s_path, vertex_web, dimension);
-
-            printf("multistep learning: total ditance %f, predicted time %f, travel time %f\n",distance,travel_time_prediction,real_travel_time);
-            for(uint j=0; j<elem_s_path; j++){
-                if (j<elem_s_path-1){
-
-                    id_neigh = is_neigh(shortest_path[j], shortest_path[j+1], vertex_web, dimension);
-
-                    double old_weight = vertex_web[shortest_path[j]].cost[id_neigh];
-                    double new_weight = old_weight*(real_travel_time/travel_time_prediction);
-                    printf("\tfrom %d to %d cost %f",shortest_path[j], shortest_path[j+1],old_weight);
-                    vertex_web[shortest_path[j]].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
-                    printf(" -> %f\n",vertex_web[shortest_path[j]].cost[id_neigh]);
-
-                    int id_neigh2 = is_neigh(shortest_path[j+1], shortest_path[j], vertex_web, dimension);
-                    vertex_web[shortest_path[j+1]].cost[id_neigh2] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
-                }
+            //update global idleness of next vertex to avoid conflicts
+            if (next_vertex>=0 && next_vertex< dimension){
+                pthread_mutex_lock(&lock);
+                global_instantaneous_idleness[next_vertex] = 0.0;
+                pthread_mutex_unlock(&lock);
             }
 
-            delete shortest_path;
-        }
-        else {
-            printf("can learn\n");
-            double old_weight = vertex_web[extimation_starting_point].cost[id_neigh];
-            double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+            // calculate path to goal
+            dijkstra(current_vertex, next_vertex, path_to_goal, to_goal_size, vertex_web, dimension);
+            to_goal_position = 0;
 
-            vertex_web[extimation_starting_point].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
-
-            int id_neigh2 = is_neigh(current_vertex, extimation_starting_point, vertex_web, dimension);
-            vertex_web[current_vertex].cost[id_neigh2] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
-
-            printf("traveled time from %d to %d:\n"
-                    "real time      : %fs\n"
-                    "predicted time : %fs\n"
-                    "old weight : %f\n"
-                    "new weight : %f\n",
-                    extimation_starting_point, current_vertex,real_travel_time,
-                    travel_time_prediction, old_weight, vertex_web[extimation_starting_point].cost[id_neigh]);
+            /** SEND GOAL (REACHED) AND INTENTION **/
+            send_goal_reached(); // Send TARGET to monitor
+            send_results();  // Algorithm specific function
         }
     }
 
-    /** SEND GOAL (REACHED) AND INTENTION **/
-    send_goal_reached(); // Send TARGET to monitor
-    send_results();  // Algorithm specific function
+    // set a proper waiting time
+    if ( to_goal_position == to_goal_size-2 )
+        goal_reached_wait = real_goal_reached_wait;
+    else
+        goal_reached_wait = 0.0;
 
+    // prediction for learning
+    make_prediction();
+
+    //Send the goal to the robot (Global Map)
+    sendGoal(path_to_goal[to_goal_position+1]);  // send to move_base
+    goal_complete = false;
+
+    //compute next next vertex
+    if ( next_next_vertex == -1 )
+        next_next_vertex = compute_next_vertex(next_vertex);
+
+    printf("<<< DONE Computed next vertices: current_vertex = %d, next_vertex=%d, next_next_vertex=%d >>>\n",current_vertex, next_vertex,next_next_vertex);
+
+}
+
+void DTASSILearning_Agent::learn_from_edge() {
+
+    uint extimation_starting_point = path_to_goal[to_goal_position-1];
+    uint actual_vertex = path_to_goal[to_goal_position];
+
+    // learn from prediction
+    double real_travel_time = ros::Time::now().toSec() - extimation_starting_time;
+
+    // find neighbourn positions
+    int id_neigh = is_neigh(extimation_starting_point, actual_vertex, vertex_web, dimension);
+    int id_neigh2 = is_neigh(actual_vertex, extimation_starting_point, vertex_web, dimension);
+
+    // calculate new weight
+    double old_weight = vertex_web[extimation_starting_point].cost[id_neigh];
+    double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+
+    // update value
+    vertex_web[extimation_starting_point].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+    vertex_web[actual_vertex].cost[id_neigh2] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
+
+    printf("traveled time from %d to %d:\n"
+            "real time      : %fs\n"
+            "predicted time : %fs\n"
+            "old weight : %f\n"
+            "new weight : %f\n",
+            extimation_starting_point, actual_vertex,real_travel_time,
+            travel_time_prediction, old_weight, vertex_web[extimation_starting_point].cost[id_neigh]);
+}
+
+void DTASSILearning_Agent::make_prediction() {
     // prediction on distance
     extimation_starting_time = ros::Time::now().toSec();
     //travel_time_prediction = learnign_weigh[extimation_starting_point][next_vertex]*(compute_cost(extimation_starting_point,next_vertex));
-    travel_time_prediction = compute_cost(extimation_starting_point,next_vertex);
+    travel_time_prediction = compute_cost(path_to_goal[to_goal_position],
+            path_to_goal[to_goal_position+1]);
 
     // prediction on rotation
     float y_diff = vertex_web[next_vertex].y - vertex_web[current_vertex].y;
@@ -213,28 +252,15 @@ void DTASSILearning_Agent::onGoalComplete()
             pred_yaw = -(PI/2.0f);
     }
 
-    printf("NEXT ANGLE %f", pred_yaw*(180.0f/PI));
+    //printf("NEXT ANGLE %f", pred_yaw*(180.0f/PI));
     float pose_x, pose_y, current_yaw;
     getRobotPose(ID_ROBOT,pose_x,pose_y,current_yaw);
-    printf("  CURRENT ANGLE: %f\n", current_yaw*(180.0f/PI));
+    //printf("  CURRENT ANGLE: %f\n", current_yaw*(180.0f/PI));
     float rotate_prediction = std::min(std::abs(pred_yaw-current_yaw),std::abs(-PI - current_yaw)+(PI - pred_yaw));
-    printf(" need to rotate %f  so  %f seconds\n", rotate_prediction*(180.0/PI),rotate_prediction);
-    travel_time_prediction+= rotate_prediction;
 
-    ROS_INFO("Sending goal: Vertex %d (%f,%f) at time %fs\n",next_vertex,vertex_web[next_vertex].x,vertex_web[next_vertex].y,extimation_starting_time);
-
-    //Send the goal to the robot (Global Map)
-    sendGoal(next_vertex);  // send to move_base
-
-    goal_complete = false;
-
-    //compute next next vertex
-    //printf("computing next_next_vertex :\n current_vertex = %d, next_vertex=%d, next_next_vertex=%d\n",current_vertex, next_vertex,next_next_vertex);
-
-    next_next_vertex = compute_next_vertex(next_vertex);
-
-    printf("<<< DONE Computed next vertices: current_vertex = %d, next_vertex=%d, next_next_vertex=%d >>>\n",current_vertex, next_vertex,next_next_vertex);
-
+    printf("prediction total:%f distance:%f turning%f\n",travel_time_prediction+rotate_prediction,
+            travel_time_prediction, rotate_prediction);
+    travel_time_prediction += rotate_prediction;
 }
 
 double DTASSILearning_Agent::compute_bid(int nv){
