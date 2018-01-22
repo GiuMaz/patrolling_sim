@@ -36,7 +36,7 @@ Map_names = ['cumberland','example','grid','1r5','broughton','DIAG_labs','DIAG_f
 
 NRobots_list = ['1','2','4','6','8','10','12']
 
-Robot_speed = ['normal','slow']
+Robot_speed = ['n','s']
 
 LocalizationMode_list = ['AMCL','fake_localization']
 
@@ -104,7 +104,7 @@ def getSimulationRunning():
 # Terminates if simulation is stopped (/simulation_running param is false)
 # or if timeout is reached (if this is >0)
 # CUSTOM_STAGE: use of extended API for stage (requires custom stage and stage_ros).
-def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT, ROBOT0_SPEED, CUSTOM_STAGE, SPEEDUP):
+def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT, ROBOT_SPEED, CUSTOM_STAGE, SPEEDUP):
 
     ALG = findAlgName(ALG_SHORT)
     print 'Run the experiment'
@@ -118,7 +118,7 @@ def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT
     print 'Communication delay ',COMMDELAY
     print 'Terminal ',TERM
     print 'Timeout ',TIMEOUT
-    print 'Speed Robot 0 ',ROBOT0_SPEED
+    print 'Speed Robot ',ROBOT_SPEED
     print 'Custom Stage ',CUSTOM_STAGE
     print 'Simulator speed-up ',SPEEDUP    
 
@@ -191,8 +191,13 @@ def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT
         elif (NAV_MODULE=="thin_localizer_only"):
            cmd = cmd + ' use_amcl:=false use_move_base:=true  use_thin_localizer:=true use_thin_planner:=false '
 
-        if i == 0 and ROBOT0_SPEED == "slow":
+        #if i == 0 and ROBOT_SPEED == "slow":
+        #    cmd = cmd + ' move_base_slow:=true '
+        if len(ROBOT_SPEED) > i and ROBOT_SPEED[i] == 's':
+            print "robot ", i, " is slow"
             cmd = cmd + ' move_base_slow:=true '
+        else:
+            print "robot ", i, " is normal"
 
            
         cmd = cmd + "'"
@@ -469,17 +474,17 @@ def main():
     COMMDELAY = sys.argv[8]
     TERM = sys.argv[9]
     TIMEOUT = int(sys.argv[10])
-    ROBOT0_SPEED = 1.0
+    ROBOT_SPEED = "nnnnnnnnnnnn"
     CUSTOM_STAGE = False
     SPEEDUP = 1.0
     if (len(sys.argv)>=12):
-      ROBOT0_SPEED = sys.argv[11]
+      ROBOT_SPEED = sys.argv[11]
     if (len(sys.argv)>=13):
       CUSTOM_STAGE = sys.argv[12]
     if (len(sys.argv)>=14):
       SPEEDUP = float(sys.argv[13])
     
-    run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT,ROBOT0_SPEED, CUSTOM_STAGE,SPEEDUP)
+    run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT, COMMDELAY, TERM, TIMEOUT,ROBOT_SPEED, CUSTOM_STAGE,SPEEDUP)
 
  
 
