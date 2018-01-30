@@ -36,6 +36,7 @@
 *********************************************************************/
 
 #include "SSIPatrolAgent.h"
+#include <std_srvs/Empty.h>
 
 //Sequential Single Item Auction with dynamic compact partition of the environment
 class DTASSILearning_Agent: public SSIPatrolAgent {
@@ -82,7 +83,9 @@ class DTASSILearning_Agent: public SSIPatrolAgent {
 
         DTASSILearning_Agent(){}
 
+        virtual void run();
         void onGoalComplete();
+        void onGoalNotComplete();
         double compute_cost(int start, int end);
         void init(int argc, char** argv);
 };
@@ -207,7 +210,13 @@ void DTASSILearning_Agent::learn_from_edge() {
 
     // calculate new weight
     double old_weight = vertex_web[extimation_starting_point].cost[id_neigh];
-    double new_weight = old_weight * (real_travel_time / travel_time_prediction) ;
+    double travel_ratio = (real_travel_time / travel_time_prediction);
+
+    // fix a maximum bound for problematic travel
+    if ( travel_ratio < 0.5 ) travel_ratio = 0.5;
+    if ( travel_ratio > 2.0 ) travel_ratio = 2.0;
+
+    double new_weight = old_weight * travel_ratio;
 
     // update value
     vertex_web[extimation_starting_point].cost[id_neigh] = alpha * ( new_weight ) + (1.0-alpha) * old_weight;
@@ -258,8 +267,6 @@ void DTASSILearning_Agent::make_prediction() {
     //printf("  CURRENT ANGLE: %f\n", current_yaw*(180.0f/PI));
     float rotate_prediction = std::min(std::abs(pred_yaw-current_yaw),std::abs(-PI - current_yaw)+(PI - pred_yaw));
 
-    printf("prediction total:%f distance:%f turning%f\n",travel_time_prediction+rotate_prediction,
-            travel_time_prediction, rotate_prediction);
     travel_time_prediction += rotate_prediction;
 }
 
@@ -385,6 +392,115 @@ double DTASSILearning_Agent::compute_cost(int cv, int nv)
     return distance;
 }
 
+/* modified version of run, needed to account the different handgling
+ * of path planning
+ */
+void DTASSILearning_Agent::run() {
+    
+    // get ready
+    ready();
+
+    //initially clear the costmap (to make sure the robot is not trapped):
+    std_srvs::Empty srv;
+    std::string mb_string;
+
+    if (ID_ROBOT>-1){
+        std::ostringstream id_string;
+        id_string << ID_ROBOT;
+        mb_string = "robot_" + id_string.str() + "/";
+    }
+    mb_string += "move_base/clear_costmaps";
+
+    if (ros::service::call(mb_string.c_str(), srv)){
+        ROS_INFO("Costmap correctly cleared before patrolling task.");
+    }else{
+        ROS_WARN("Was not able to clear costmap (%s) before patrolling...",
+                mb_string.c_str());
+    }
+
+    // Asynch spinner (non-blocking)
+    ros::AsyncSpinner spinner(2); // Use n threads
+    spinner.start();
+
+    /* Run Algorithm */ 
+    
+    ros::Rate loop_rate(30); //0.033 seconds or 30Hz
+    
+    while(ros::ok()){
+
+        if (goal_complete) {
+            onGoalComplete();  // can be redefined
+            resend_goal_count=0;
+        }
+        else { // goal not complete (active)
+            if (interference) {
+                do_interference_behavior();
+            }       
+
+            if (ResendGoal) {
+                //Send the goal to the robot (Global Map)
+                if (resend_goal_count<3) {
+                    resend_goal_count++;
+                    ROS_INFO("Re-Sending goal (%d) - Vertex %d (%f,%f)",
+                            resend_goal_count, path_to_goal[to_goal_position+1],
+                            vertex_web[path_to_goal[to_goal_position+1]].x,
+                            vertex_web[path_to_goal[to_goal_position+1]].y);
+
+                    sendGoal(path_to_goal[to_goal_position+1]);
+                }
+                else {
+                    resend_goal_count=0;
+                    onGoalNotComplete();
+                }
+                ResendGoal = false;
+            }
+
+            processEvents();
+
+            if (end_simulation) return;
+        }
+        loop_rate.sleep(); 
+    }
+}
+
+void DTASSILearning_Agent::onGoalNotComplete()
+{   
+    int prev_vertex = next_vertex;
+    
+    ROS_INFO("Goal not complete - From vertex %d to vertex %d\n", current_vertex, next_vertex);   
+    
+    //devolver proximo vertex tendo em conta apenas as idlenesses;
+    next_vertex = compute_next_vertex();
+    //printf("Move Robot to Vertex %d (%f,%f)\n", next_vertex, vertex_web[next_vertex].x, vertex_web[next_vertex].y);
+
+    // Look for a random adjacent vertex different from the previous one
+    int random_cnt=0;
+    while (next_vertex == prev_vertex && random_cnt++<10) {
+        int num_neighs = vertex_web[current_vertex].num_neigh;
+        int i = rand() % num_neighs;
+        next_vertex = vertex_web[current_vertex].id_neigh[i];
+        ROS_INFO("Choosing another random vertex %d\n", next_vertex);
+    }
+    
+    // Look for any random vertex different from the previous one
+    while (next_vertex == prev_vertex && next_vertex == current_vertex) {
+        int i = rand() % dimension;
+        next_vertex = i;
+        ROS_INFO("Choosing another random vertex %d\n", next_vertex);
+    }
+
+    //Send the goal to the robot (Global Map)
+    ROS_INFO("Re-Sending NEW goal - Vertex %d (%f,%f)\n", next_vertex, vertex_web[next_vertex].x, vertex_web[next_vertex].y);
+
+    // calculate path to goal
+    dijkstra(current_vertex, next_vertex, path_to_goal, to_goal_size, vertex_web, dimension);
+    to_goal_position = 0;
+
+    //sendGoal(vertex_web[next_vertex].x, vertex_web[next_vertex].y);  
+    sendGoal(path_to_goal[to_goal_position+1]);
+    
+    goal_complete = false;    
+}
 int main(int argc, char** argv) {
 
     DTASSILearning_Agent agent;
