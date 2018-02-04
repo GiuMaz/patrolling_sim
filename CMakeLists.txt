@@ -180,8 +180,12 @@ add_executable(DTASSILearning src/DTASSILearning_Agent.cpp)
 ## Specify libraries to link a library or executable target against
 target_link_libraries(DTASSILearning PatrolAgent SSIPatrolAgent ${catkin_LIBRARIES})
  
+## Declare a cpp executable 
+add_executable(DTASSILearning_fix src/DTASSILearning_Agent_fix.cpp)
+## Specify libraries to link a library or executable target against
+target_link_libraries(DTASSILearning_fix PatrolAgent SSIPatrolAgent ${catkin_LIBRARIES})
+
 # Results and Monitor Node:
- 
 ## Declare a cpp executable 
 add_executable(monitor src/monitor.cpp src/getgraph.cpp)
 add_dependencies(monitor ${PROJECT_NAME}_gencpp)

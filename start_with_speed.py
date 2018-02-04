@@ -29,7 +29,8 @@ Alg_names = [
         [ 'CBLS', 'CBLS' ],
         [ 'DTAG', 'DTAGreedy' ],
         [ 'DTAP', 'DTASSIPart' ],
-        [ 'DTAPL', 'DTASSILearning' ]
+        [ 'DTAPL', 'DTASSILearning' ],
+        [ 'DTAPLF', 'DTASSILearning_fix' ]
      ]
 
 Map_names = ['cumberland','example','grid','1r5','broughton','DIAG_labs','DIAG_floor1']   
@@ -223,8 +224,8 @@ def run_experiment(MAP, NROBOTS, INITPOS, ALG_SHORT, LOC_MODE, NAV_MODULE, GWAIT
         else:
             now = datetime.datetime.now()
             dateString = now.strftime("%Y-%m-%d-%H:%M")
-            cmd = 'bash -c \'rosrun patrolling_sim '+ALG+' __name:=patrol_robot'+str(i)+' '+MAP+' '+str(i)+' | tee logs/'+ALG+'-'+dateString+'-robot'+str(i)+'.log \''
-            #cmd = 'bash -c \'rosrun patrolling_sim '+ALG+' __name:=patrol_robot'+str(i)+' '+MAP+' '+str(i)+'\''
+            #cmd = 'bash -c \'rosrun patrolling_sim '+ALG+' __name:=patrol_robot'+str(i)+' '+MAP+' '+str(i)+' > logs/'+ALG+'-'+dateString+'-robot'+str(i)+'.log \''
+            cmd = 'bash -c \'rosrun patrolling_sim '+ALG+' __name:=patrol_robot'+str(i)+' '+MAP+' '+str(i)+'\''
         print cmd
         if (TERM == 'xterm'):
 	  os.system('xterm -e  "'+cmd+'" &')

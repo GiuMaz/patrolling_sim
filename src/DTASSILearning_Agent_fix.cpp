@@ -119,7 +119,6 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
     // rember waiting time
     real_goal_reached_wait = goal_reached_wait;
 
-    /*
     if ( ID_ROBOT == 0 || ID_ROBOT == 1 ) {
         //set a slower speed
         for ( int i =0; i < dimension; ++i) {
@@ -127,7 +126,6 @@ void DTASSILearning_Agent::init(int argc, char** argv) {
                 vertex_web[i].cost[j] = vertex_web[i].cost[j] * 2;
         }
     }
-    */
 
 }
 
